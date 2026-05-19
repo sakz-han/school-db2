@@ -1,0 +1,1770 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>부동산 탐색기</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --surface: #131920;
+      --surface2: #1a2230;
+      --surface3: #1f2a3a;
+      --border: #253040;
+      --border2: #2e3d52;
+      --accent: #4d9eff;
+      --accent-dim: rgba(77,158,255,0.12);
+      --green: #34c97a;
+      --warn: #ff5f5f;
+      --yellow: #f5b731;
+      --purple: #b76eff;
+      --text: #dce8f5;
+      --text2: #8fa5bc;
+      --text3: #556478;
+      --highlight: #ff8c3a;
+      --shadow-color: rgba(0,0,0,0.6);
+      --sheet-radius: 20px;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body { height:100%; overflow:hidden; font-family:'Pretendard', 'Noto Sans KR', sans-serif; background:var(--bg); color:var(--text); }
+
+    /* ════════════════════════════
+       AUTH GATE
+    ════════════════════════════ */
+    #authGate {
+      position:fixed; inset:0; z-index:99999;
+      background: radial-gradient(ellipse at 30% 20%, #0d1e32 0%, #0b0f14 60%);
+      display:flex; align-items:center; justify-content:center;
+      padding:20px;
+    }
+    #authGate.hidden { display:none; }
+
+    .gate-wrap {
+      width:100%; max-width:340px;
+      text-align:center;
+    }
+    .gate-icon {
+      width:64px; height:64px; border-radius:18px;
+      background: linear-gradient(135deg, #1a3a5c, #0d2340);
+      border:1px solid var(--border2);
+      display:inline-flex; align-items:center; justify-content:center;
+      font-size:28px; margin-bottom:20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.06);
+    }
+    .gate-title {
+      font-size:22px; font-weight:700; color:var(--text);
+      letter-spacing:-0.5px; margin-bottom:4px;
+    }
+    .gate-sub { font-size:13px; color:var(--text3); margin-bottom:32px; }
+
+    .gate-field {
+      position:relative; margin-bottom:12px;
+    }
+    .gate-input {
+      width:100%; padding:14px 16px;
+      background:var(--surface2);
+      border:1.5px solid var(--border2);
+      border-radius:12px;
+      color:var(--text); font-size:16px;
+      font-family:'JetBrains Mono', monospace;
+      text-align:center; letter-spacing:3px;
+      transition:border-color .2s;
+    }
+    .gate-input:focus { outline:none; border-color:var(--accent); }
+    .gate-input.error { border-color:var(--warn); animation:shake .3s; }
+
+    @keyframes shake {
+      0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)}
+    }
+
+    .gate-btn {
+      width:100%; padding:14px;
+      background:var(--accent); color:#fff;
+      border:none; border-radius:12px;
+      font-size:15px; font-weight:700;
+      cursor:pointer; font-family:inherit;
+      transition:opacity .15s, transform .1s;
+      letter-spacing:-0.2px;
+    }
+    .gate-btn:active { transform:scale(0.98); opacity:.9; }
+
+    .gate-error-msg {
+      font-size:12px; color:var(--warn);
+      margin-top:10px; min-height:18px;
+      font-weight:500;
+    }
+    .gate-expire {
+      margin-top:20px; font-size:11px; color:var(--text3);
+    }
+    .gate-expire b { color:var(--yellow); }
+
+    /* ════════════════════════════
+       FULL-SCREEN MAP
+    ════════════════════════════ */
+    #map {
+      position:fixed; inset:0; z-index:0;
+    }
+    #map img { filter:grayscale(0.9) brightness(0.85) contrast(1.1); }
+
+    /* ════════════════════════════
+       FLOATING SEARCH BAR (TOP)
+    ════════════════════════════ */
+    #searchBar {
+      position:fixed; top:12px; left:12px; right:12px; z-index:100;
+      display:flex; gap:8px; align-items:center;
+    }
+    .search-pill {
+      flex:1; display:flex; align-items:center; gap:8px;
+      background:rgba(19,25,32,0.95);
+      border:1.5px solid var(--border2);
+      border-radius:14px; padding:0 14px;
+      backdrop-filter:blur(16px);
+      box-shadow:0 4px 24px rgba(0,0,0,0.5);
+      transition:border-color .2s;
+    }
+    .search-pill:focus-within { border-color:var(--accent); }
+    .search-icon { font-size:15px; flex-shrink:0; opacity:.6; }
+    #addrInput {
+      flex:1; background:none; border:none; outline:none;
+      color:var(--text); font-size:14px; font-family:inherit;
+      padding:12px 0;
+    }
+    #addrInput::placeholder { color:var(--text3); }
+
+    .search-action-btn {
+      width:44px; height:44px; border-radius:12px;
+      background:var(--accent); border:none;
+      color:#fff; font-size:18px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      box-shadow:0 4px 16px rgba(77,158,255,0.4);
+      flex-shrink:0;
+      transition:transform .1s, opacity .15s;
+    }
+    .search-action-btn:active { transform:scale(0.93); opacity:.9; }
+
+    /* ════════════════════════════
+       FLOATING FAB (right side)
+    ════════════════════════════ */
+    .fab-group {
+      position:fixed; right:14px; z-index:100;
+      display:flex; flex-direction:column; gap:10px;
+      transition:bottom .4s cubic-bezier(.4,0,.2,1);
+    }
+
+    .fab {
+      width:44px; height:44px; border-radius:12px;
+      background:rgba(19,25,32,0.95);
+      border:1.5px solid var(--border2);
+      color:var(--text2); font-size:18px;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,0.4);
+      backdrop-filter:blur(12px);
+      transition:border-color .2s, color .2s, transform .1s;
+      flex-shrink:0;
+    }
+    .fab:active { transform:scale(0.93); }
+    .fab.active { border-color:var(--accent); color:var(--accent); background:rgba(77,158,255,0.12); }
+    .fab.warn-fab { border-color:rgba(245,183,49,0.4); color:var(--yellow); background:rgba(245,183,49,0.08); }
+
+    /* ════════════════════════════
+       BOTTOM SHEET
+    ════════════════════════════ */
+    #bottomSheet {
+      position:fixed; left:0; right:0; z-index:200;
+      background:var(--surface);
+      border-radius:var(--sheet-radius) var(--sheet-radius) 0 0;
+      border-top:1.5px solid var(--border2);
+      box-shadow:0 -8px 40px rgba(0,0,0,0.6);
+      transition:transform .4s cubic-bezier(.4,0,.2,1);
+      display:flex; flex-direction:column;
+      /* Sheet sits at bottom */
+      bottom:0;
+      max-height:80dvh;
+      transform:translateY(calc(100% - 72px));
+    }
+    #bottomSheet.peek { transform:translateY(calc(100% - 72px)); }
+    #bottomSheet.half { transform:translateY(calc(100% - 52dvh)); }
+    #bottomSheet.full { transform:translateY(0); }
+
+    .sheet-handle-bar {
+      width:36px; height:4px; border-radius:2px;
+      background:var(--border2); margin:10px auto 0;
+      flex-shrink:0;
+    }
+    .sheet-header {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:10px 16px 12px;
+      cursor:pointer; flex-shrink:0;
+      user-select:none;
+    }
+    .sheet-title {
+      font-size:13px; font-weight:600; color:var(--text2);
+      display:flex; align-items:center; gap:6px;
+    }
+    .sheet-count {
+      background:var(--accent-dim); color:var(--accent);
+      border:1px solid rgba(77,158,255,0.25);
+      border-radius:8px; font-size:11px; font-weight:700;
+      padding:2px 7px; font-family:'JetBrains Mono',monospace;
+    }
+    .sheet-toggle-icon {
+      font-size:12px; color:var(--text3);
+      transition:transform .3s;
+    }
+    #bottomSheet.full .sheet-toggle-icon { transform:rotate(180deg); }
+
+    .sheet-content {
+      flex:1; overflow-y:auto; padding:0 14px 16px;
+      overscroll-behavior:contain;
+      padding-bottom:calc(16px + var(--safe-bottom));
+    }
+    .sheet-content::-webkit-scrollbar { width:2px; }
+    .sheet-content::-webkit-scrollbar-thumb { background:var(--border2); border-radius:2px; }
+
+    /* ════════════════════════════
+       SIDE PANEL (Layers / Settings)
+    ════════════════════════════ */
+    #sidePanel {
+      position:fixed; top:0; right:0; bottom:0; z-index:300;
+      width:min(300px, 88vw);
+      background:var(--surface);
+      border-left:1.5px solid var(--border2);
+      box-shadow:-8px 0 40px rgba(0,0,0,0.6);
+      transform:translateX(100%);
+      transition:transform .35s cubic-bezier(.4,0,.2,1);
+      display:flex; flex-direction:column;
+      overflow-y:auto;
+    }
+    #sidePanel.open { transform:translateX(0); }
+
+    .panel-header {
+      padding:52px 16px 16px;
+      border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between;
+      flex-shrink:0;
+    }
+    .panel-title { font-size:15px; font-weight:700; }
+    .panel-close {
+      width:32px; height:32px; border-radius:8px;
+      background:var(--surface2); border:1px solid var(--border);
+      color:var(--text2); font-size:16px; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+    }
+
+    .panel-section { padding:14px 16px; border-bottom:1px solid var(--border); }
+    .panel-section-title {
+      font-size:10px; font-weight:600; color:var(--text3);
+      text-transform:uppercase; letter-spacing:.8px; margin-bottom:12px;
+    }
+
+    .toggle-row {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:7px 0;
+    }
+    .toggle-label { font-size:13px; color:var(--text); display:flex; align-items:center; gap:7px; }
+    .toggle-badge {
+      display:inline-block; width:10px; height:10px; border-radius:2px;
+    }
+
+    /* Toggle Switch */
+    .sw { position:relative; width:40px; height:22px; flex-shrink:0; }
+    .sw input { opacity:0; width:0; height:0; }
+    .sw-track {
+      position:absolute; inset:0; background:var(--surface3);
+      border:1.5px solid var(--border2); border-radius:11px; cursor:pointer;
+      transition:background .2s, border-color .2s;
+    }
+    .sw-track::after {
+      content:''; position:absolute; width:14px; height:14px;
+      background:#fff; border-radius:50%;
+      top:50%; left:3px; transform:translateY(-50%);
+      transition:left .2s; box-shadow:0 1px 4px rgba(0,0,0,0.3);
+    }
+    .sw input:checked + .sw-track { background:var(--accent); border-color:var(--accent); }
+    .sw input:checked + .sw-track::after { left:21px; }
+
+    /* Select */
+    .styled-select {
+      background:var(--surface2); border:1.5px solid var(--border2);
+      border-radius:10px; color:var(--text); padding:9px 12px;
+      font-size:13px; font-family:inherit; width:100%;
+      margin-top:6px;
+    }
+
+    /* ════════════════════════════
+       OVERLAY BACKDROP
+    ════════════════════════════ */
+    #backdrop {
+      position:fixed; inset:0; z-index:250;
+      background:rgba(0,0,0,0.5);
+      opacity:0; pointer-events:none;
+      transition:opacity .3s;
+    }
+    #backdrop.on { opacity:1; pointer-events:all; }
+
+    /* ════════════════════════════
+       PARCEL INFO CARD
+    ════════════════════════════ */
+    .parcel-info-card {
+      background:var(--surface2);
+      border:1px solid var(--border2);
+      border-radius:14px; padding:14px;
+      margin-bottom:12px;
+    }
+    .parcel-info-title {
+      font-size:11px; font-weight:600; color:var(--accent);
+      text-transform:uppercase; letter-spacing:.6px; margin-bottom:10px;
+      display:flex; align-items:center; gap:6px;
+    }
+    .parcel-row {
+      display:flex; justify-content:space-between; align-items:center;
+      padding:5px 0; border-bottom:1px solid var(--border);
+      font-size:12px;
+    }
+    .parcel-row:last-child { border-bottom:none; }
+    .parcel-row-k { color:var(--text3); }
+    .parcel-row-v { font-weight:600; text-align:right; max-width:60%; }
+
+    .edu-zone-badge {
+      border-radius:10px; padding:8px 12px; margin:10px 0;
+      display:flex; align-items:center; gap:8px;
+    }
+    .edu-zone-badge .ez-icon { font-size:18px; }
+    .edu-zone-badge .ez-label { font-size:13px; font-weight:700; }
+    .edu-zone-badge .ez-sub { font-size:10px; opacity:.7; margin-top:1px; }
+
+    /* Building recap cards */
+    .bld-recap-card {
+      background:var(--surface3);
+      border:1px solid var(--border);
+      border-radius:10px; overflow:hidden; margin-top:10px;
+    }
+    .bld-recap-head {
+      background:rgba(255,255,255,0.04);
+      padding:9px 12px; border-bottom:1px solid var(--border);
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .bld-recap-name { font-size:13px; font-weight:700; color:var(--accent); }
+    .bld-recap-grid {
+      display:grid; grid-template-columns:1fr 1fr;
+      gap:1px; background:var(--border);
+    }
+    .bld-recap-cell {
+      background:var(--surface3); padding:8px 10px;
+    }
+    .bld-recap-k { font-size:10px; color:var(--text3); margin-bottom:3px; }
+    .bld-recap-v { font-size:12px; font-weight:700; color:var(--text); line-height:1.2; }
+
+    /* School cards */
+    .school-card {
+      background:var(--surface2);
+      border:1.5px solid var(--border2);
+      border-left:3px solid var(--purple);
+      border-radius:12px; padding:12px 14px; margin-bottom:8px;
+      cursor:pointer; transition:border-color .15s, background .15s;
+      position:relative;
+    }
+    .school-card.selected {
+      border-color:var(--highlight) !important;
+      background:rgba(255,140,58,0.06);
+    }
+    .school-card-top {
+      display:flex; justify-content:space-between; align-items:flex-start;
+      margin-bottom:6px;
+    }
+    .school-tag {
+      font-size:10px; font-weight:600; color:var(--purple);
+      background:rgba(183,110,255,0.12); border:1px solid rgba(183,110,255,0.25);
+      border-radius:6px; padding:2px 7px;
+      display:inline-flex; align-items:center; gap:3px;
+    }
+    .school-dist {
+      font-size:12px; font-weight:700; color:var(--accent);
+      font-family:'JetBrains Mono', monospace;
+      background:var(--accent-dim); border:1px solid rgba(77,158,255,0.2);
+      border-radius:7px; padding:2px 8px;
+    }
+    .school-name {
+      font-size:15px; font-weight:700; color:var(--text);
+      margin-bottom:3px;
+    }
+    .school-jibun { font-size:11px; color:var(--text3); }
+    .parcel-count-badge {
+      font-size:10px; color:var(--yellow);
+      background:rgba(245,183,49,0.1); border:1px solid rgba(245,183,49,0.25);
+      border-radius:6px; padding:1px 6px; margin-left:5px;
+    }
+
+    /* Apt cards */
+    .section-divider {
+      display:flex; align-items:center; gap:8px; margin:16px 0 10px;
+    }
+    .section-divider-line { flex:1; height:1px; background:var(--border); }
+    .section-divider-text {
+      font-size:11px; font-weight:600; color:var(--yellow);
+      display:flex; align-items:center; gap:5px;
+    }
+
+    .apt-card {
+      background:var(--surface2);
+      border:1.5px solid rgba(245,183,49,0.2);
+      border-left:3px solid var(--yellow);
+      border-radius:12px; padding:12px 14px; margin-bottom:8px;
+    }
+    .apt-card-name { font-size:14px; font-weight:700; color:var(--yellow); margin-bottom:3px; }
+    .apt-card-dist {
+      font-size:11px; color:var(--text3);
+      font-family:'JetBrains Mono', monospace; margin-bottom:10px;
+    }
+    .apt-stat-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:6px;
+    }
+    .apt-stat {
+      background:var(--surface3); border:1px solid var(--border);
+      border-radius:8px; padding:7px 9px;
+    }
+    .apt-stat-k { font-size:10px; color:var(--text3); margin-bottom:3px; }
+    .apt-stat-v { font-size:12px; font-weight:700; color:var(--text); }
+    .apt-stat-v.gold { color:var(--yellow); }
+    .apt-stat-v.blue { color:var(--accent); }
+    .apt-stat-v.green { color:var(--green); }
+
+    /* Solar simulation panel */
+    #shadowPanel {
+      display:none;
+      padding:14px 16px;
+      border-bottom:1px solid var(--border);
+      background:rgba(245,183,49,0.03);
+      flex-shrink:0;
+    }
+    #shadowPanel.active { display:block; }
+
+    .shadow-panel-title {
+      font-size:11px; font-weight:600; color:var(--yellow);
+      text-transform:uppercase; letter-spacing:.6px; margin-bottom:12px;
+      display:flex; align-items:center; gap:6px;
+    }
+    .shadow-panel-title::before {
+      content:''; width:3px; height:12px; background:var(--yellow); border-radius:2px;
+    }
+
+    .time-display {
+      display:flex; justify-content:space-between; align-items:center;
+      margin-bottom:8px;
+    }
+    .time-big {
+      font-size:28px; font-weight:700; color:var(--yellow);
+      font-family:'JetBrains Mono', monospace; letter-spacing:1px;
+    }
+    .time-date { font-size:11px; color:var(--text3); }
+
+    .sun-range-wrap { margin-bottom:10px; }
+    #shadowSlider {
+      width:100%; height:4px; border-radius:2px;
+      accent-color:var(--yellow); cursor:pointer;
+      background:linear-gradient(to right, var(--accent-dim), var(--border2));
+    }
+    .sun-range-labels {
+      display:flex; justify-content:space-between;
+      font-size:10px; color:var(--text3); margin-top:4px;
+      font-family:'JetBrains Mono', monospace;
+    }
+
+    .sun-info-bar {
+      background:var(--surface3); border:1px solid var(--border);
+      border-radius:8px; padding:7px 10px;
+      font-size:11px; color:var(--text2);
+      font-family:'JetBrains Mono', monospace;
+      margin-bottom:10px; text-align:center;
+    }
+
+    .shadow-btns { display:flex; gap:8px; margin-bottom:10px; }
+    .shadow-btn-play {
+      flex:1; background:var(--yellow); color:#0d1117;
+      border:none; border-radius:10px; padding:11px;
+      font-size:13px; font-weight:700; cursor:pointer;
+      font-family:inherit; transition:opacity .15s;
+    }
+    .shadow-btn-play:active { opacity:.85; }
+    .shadow-btn-exit {
+      flex:0 0 auto; background:var(--surface2);
+      border:1.5px solid var(--border2);
+      border-radius:10px; padding:11px 16px;
+      font-size:13px; color:var(--text2); cursor:pointer;
+      font-family:inherit;
+    }
+
+    .coverage-box {
+      border-radius:10px; padding:10px 12px; font-size:13px; line-height:1.6;
+    }
+    .coverage-box.has-shadow  { background:rgba(255,140,0,.08); border:1px solid rgba(255,140,0,.3); }
+    .coverage-box.no-shadow   { background:rgba(52,201,122,.07); border:1px solid rgba(52,201,122,.3); color:var(--green); }
+    .coverage-box.no-parcel   { background:var(--surface3); border:1px solid var(--border); color:var(--text3); }
+    .shadow-coverage-pct { font-size:26px; font-weight:700; font-family:'JetBrains Mono', monospace; }
+
+    /* Height legend */
+    .height-legend { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px; }
+    .hl-item { display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text2); }
+    .hl-dot { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+
+    /* Building popup */
+    .bld-info-popup {
+      position:absolute; z-index:9000;
+      background:var(--surface); border:1px solid rgba(245,183,49,.5);
+      border-radius:12px; padding:12px 14px;
+      font-size:12px; min-width:180px;
+      box-shadow:0 8px 32px rgba(0,0,0,.8);
+      pointer-events:none; line-height:1.7;
+    }
+
+    /* Map label overlays */
+    .map-label {
+      background:rgba(13,15,20,0.92); border:1.5px solid;
+      padding:4px 10px; border-radius:10px;
+      font-size:11px; font-weight:700; white-space:nowrap;
+      box-shadow:0 4px 14px rgba(0,0,0,0.6);
+      pointer-events:none; transform:translateY(-50%);
+    }
+    .map-label.school { border-color:var(--purple); color:#e7c2ff; }
+
+    /* Loading */
+    .loading-overlay {
+      position:fixed; inset:0; z-index:9999;
+      background:rgba(11,15,20,.82); backdrop-filter:blur(4px);
+      display:none; align-items:center; justify-content:center;
+      flex-direction:column; gap:14px;
+    }
+    .loading-overlay.on { display:flex; }
+    .loading-spinner {
+      width:40px; height:40px;
+      border:3px solid var(--border2);
+      border-top-color:var(--accent);
+      border-radius:50%;
+      animation:spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .loading-text {
+      font-size:13px; color:var(--text2); font-weight:500;
+    }
+
+    /* Status bar */
+    #statusBar {
+      position:fixed; bottom:calc(72px + var(--safe-bottom)); left:12px;
+      background:rgba(19,25,32,0.92); border:1px solid var(--border2);
+      border-radius:8px; padding:5px 10px;
+      font-size:10px; color:var(--text3);
+      font-family:'JetBrains Mono', monospace;
+      backdrop-filter:blur(8px);
+      transition:bottom .4s cubic-bezier(.4,0,.2,1);
+      pointer-events:none; z-index:150;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align:center; padding:32px 20px; color:var(--text3);
+    }
+    .empty-state-icon { font-size:32px; margin-bottom:10px; opacity:.5; }
+    .empty-state-text { font-size:13px; line-height:1.8; }
+
+    /* Source badge */
+    .source-badge {
+      font-size:9px; color:var(--accent);
+      background:rgba(77,158,255,0.12); border:1px solid rgba(77,158,255,0.25);
+      padding:1px 4px; border-radius:4px; margin-left:4px;
+      font-family:'JetBrains Mono', monospace;
+    }
+    .loading-badge { font-size:10px; color:var(--text3); font-style:italic; }
+
+    /* Apt search toggle */
+    .feature-toggle {
+      display:flex; align-items:center; gap:10px;
+      background:rgba(52,201,122,0.07);
+      border:1px solid rgba(52,201,122,0.2);
+      border-radius:10px; padding:10px 12px; margin-bottom:0;
+    }
+    .feature-toggle span { font-size:12px; color:var(--green); font-weight:500; }
+
+    /* Search panel in side panel */
+    .radius-chips {
+      display:flex; gap:6px; margin-top:8px; flex-wrap:wrap;
+    }
+    .radius-chip {
+      padding:6px 12px; border-radius:8px; font-size:12px;
+      background:var(--surface3); border:1.5px solid var(--border2);
+      color:var(--text2); cursor:pointer; transition:.15s;
+      font-family:inherit;
+    }
+    .radius-chip.active {
+      background:var(--accent-dim); border-color:var(--accent);
+      color:var(--accent); font-weight:600;
+    }
+
+    /* Desktop fallback */
+    @media (min-width:768px) {
+      #searchBar { top:16px; left:16px; right:80px; }
+      .fab-group { right:20px; bottom:calc(20px + var(--safe-bottom)) !important; }
+      #bottomSheet { max-width:380px; right:auto; border-radius:var(--sheet-radius); left:12px; border:1.5px solid var(--border2); }
+      #bottomSheet.full { transform:translateY(calc(100% - 80dvh)); }
+      #sidePanel { top:0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- AUTH GATE -->
+<div id="authGate">
+  <div class="gate-wrap">
+    <div class="gate-icon">🏢</div>
+    <div class="gate-title">부동산 탐색기</div>
+    <div class="gate-sub">사업규모 및 교육환경 분석</div>
+    <div class="gate-field">
+      <input class="gate-input" type="password" id="pwInput"
+        placeholder="비밀번호" autocomplete="current-password"
+        onkeydown="if(event.key==='Enter') checkAuth()" />
+    </div>
+    <button class="gate-btn" onclick="checkAuth()">입장하기</button>
+    <div class="gate-error-msg" id="gateError"></div>
+    <div class="gate-expire">이용 만료일 <b>2026년 6월 30일</b></div>
+  </div>
+</div>
+
+<!-- MAP -->
+<div id="map"></div>
+
+<!-- FLOATING SEARCH BAR -->
+<div id="searchBar">
+  <div class="search-pill">
+    <span class="search-icon">📍</span>
+    <input id="addrInput" placeholder="주소 입력 (예: 송파구 가락동 910)"
+      onkeydown="if(event.key==='Enter') doSearch()" />
+  </div>
+  <button class="search-action-btn" onclick="doSearch()" title="검색">🔍</button>
+</div>
+
+<!-- FAB GROUP -->
+<div class="fab-group" id="fabGroup" style="bottom:calc(82px + var(--safe-bottom));">
+  <div class="fab" onclick="toggleSidePanel()" title="설정 및 레이어">⚙️</div>
+  <div class="fab" id="shadowModeBtn" onclick="activateShadowMode()" title="일조 시뮬레이션" style="display:none;">🌞</div>
+</div>
+
+<!-- BACKDROP -->
+<div id="backdrop" onclick="closeSidePanel()"></div>
+
+<!-- SIDE PANEL (Layers + Settings) -->
+<div id="sidePanel">
+  <div class="panel-header">
+    <span class="panel-title">⚙️ 설정 및 레이어</span>
+    <button class="panel-close" onclick="closeSidePanel()">✕</button>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-section-title">검색 옵션</div>
+
+    <div class="toggle-row">
+      <span class="toggle-label">학교 검색 반경</span>
+    </div>
+    <div class="radius-chips" id="radiusChips">
+      <button class="radius-chip" onclick="setRadius(200,this)">200m</button>
+      <button class="radius-chip" onclick="setRadius(300,this)">300m</button>
+      <button class="radius-chip active" onclick="setRadius(500,this)">500m</button>
+      <button class="radius-chip" onclick="setRadius(1000,this)">1km</button>
+    </div>
+    <select id="radiusSel" style="display:none;"></select>
+
+    <div class="toggle-row" style="margin-top:14px;">
+      <span class="toggle-label">🏢 학교 클릭 시 인근 단지 조회</span>
+      <label class="sw"><input type="checkbox" id="searchApt" checked /><div class="sw-track"></div></label>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-section-title">지도 레이어</div>
+    <div class="toggle-row">
+      <span class="toggle-label">지적편집도</span>
+      <label class="sw"><input type="checkbox" onchange="toggleCadastral(this)" checked /><div class="sw-track"></div></label>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label">스카이뷰</span>
+      <label class="sw"><input type="checkbox" onchange="toggleSkyview(this)" /><div class="sw-track"></div></label>
+    </div>
+  </div>
+
+  <div class="panel-section">
+    <div class="panel-section-title">교육환경보호구역</div>
+    <div class="toggle-row">
+      <span class="toggle-label"><span class="toggle-badge" style="background:#ff3b30;"></span> 절대보호구역 50m</span>
+      <label class="sw"><input type="checkbox" id="toggleEduZone" onchange="toggleEduZoneDisplay(this)" checked /><div class="sw-track"></div></label>
+    </div>
+    <div class="toggle-row">
+      <span class="toggle-label"><span class="toggle-badge" style="background:#ff9500;"></span> 상대보호구역 200m</span>
+      <label class="sw"><input type="checkbox" id="toggleEduZone2" onchange="toggleEduZoneDisplay(this)" checked /><div class="sw-track"></div></label>
+    </div>
+  </div>
+</div>
+
+<!-- SOLAR SIMULATION PANEL (embedded in bottom sheet header area) -->
+<div id="shadowPanel">
+  <div class="shadow-panel-title">일조 시뮬레이션 (동지 기준)</div>
+
+  <div class="height-legend">
+    <div class="hl-item"><div class="hl-dot" style="background:#88ccff"></div>~15m</div>
+    <div class="hl-item"><div class="hl-dot" style="background:#ffcc00"></div>~30m</div>
+    <div class="hl-item"><div class="hl-dot" style="background:#ff9900"></div>~60m</div>
+    <div class="hl-item"><div class="hl-dot" style="background:#ff4444"></div>60m+</div>
+  </div>
+
+  <div class="time-display">
+    <div>
+      <div class="time-big" id="shadowTimeLabel">12:00</div>
+      <div class="time-date">📅 12월 21일 (동지) 고정</div>
+    </div>
+    <div id="coveragePctBig" style="text-align:right; font-size:11px; color:var(--text3);"></div>
+  </div>
+
+  <div class="sun-range-wrap">
+    <input type="range" id="shadowSlider" min="8" max="17" step="0.25" value="12" oninput="onShadowSlider(this)" />
+    <div class="sun-range-labels"><span>08:00</span><span>12:00</span><span>17:00</span></div>
+  </div>
+
+  <div class="sun-info-bar" id="sunInfoBar">태양 위치 계산 대기 중...</div>
+
+  <div class="shadow-btns">
+    <button class="shadow-btn-play" id="shadowPlayBtn" onclick="toggleShadowAnim()">▶ 재생</button>
+    <button class="shadow-btn-exit" onclick="exitShadowMode()">✕ 종료</button>
+  </div>
+  <div id="shadowCoverageBox"></div>
+  <input type="hidden" id="shadowDateHidden" value="2025-12-21" />
+</div>
+
+<!-- BOTTOM SHEET -->
+<div id="bottomSheet" class="peek">
+  <div class="sheet-handle-bar"></div>
+  <div class="sheet-header" onclick="toggleSheet()">
+    <div class="sheet-title">
+      📋 분석 결과
+      <span class="sheet-count" id="resultCount">0</span>
+    </div>
+    <span class="sheet-toggle-icon">▲</span>
+  </div>
+  <div class="sheet-content" id="sheetContent">
+    <div id="targetParcelInfo"></div>
+    <div id="schoolListWrapper">
+      <div class="empty-state">
+        <div class="empty-state-icon">🗂</div>
+        <div class="empty-state-text">주소를 검색하면<br>분석 결과가 여기에 표시됩니다</div>
+      </div>
+    </div>
+    <div id="aptListSection" style="display:none;">
+      <div class="section-divider">
+        <div class="section-divider-line"></div>
+        <div class="section-divider-text">🏢 인근 대형단지</div>
+        <div class="section-divider-line"></div>
+      </div>
+      <div id="aptCardList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- STATUS BAR -->
+<div id="statusBar">대기 중...</div>
+
+<!-- LOADING -->
+<div class="loading-overlay" id="loading">
+  <div class="loading-spinner"></div>
+  <p class="loading-text" id="loadingMsg">처리 중...</p>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   CORS PROXY
+═══════════════════════════════════════════════════ */
+function pFetch(url) {
+  return fetch('https://corsproxy.io/?' + encodeURIComponent(url));
+}
+
+/* ═══════════════════════════════════════════════════
+   AUTH GATE
+═══════════════════════════════════════════════════ */
+const CORRECT_PW = 'econex4451@';
+const EXPIRE_DATE = new Date('2026-06-30T23:59:59');
+
+function checkAuth() {
+  if (new Date() > EXPIRE_DATE) {
+    document.getElementById('gateError').textContent = '⛔ 이용 기간이 만료되었습니다.';
+    return;
+  }
+  const pw = document.getElementById('pwInput').value;
+  if (pw === CORRECT_PW) {
+    document.getElementById('authGate').classList.add('hidden');
+    if (!map) initMap();
+  } else {
+    const inp = document.getElementById('pwInput');
+    inp.classList.remove('error');
+    void inp.offsetWidth;
+    inp.classList.add('error');
+    document.getElementById('gateError').textContent = '비밀번호가 올바르지 않습니다';
+    inp.value = '';
+    inp.focus();
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  if (new Date() > EXPIRE_DATE) checkAuth();
+  document.getElementById('pwInput').focus();
+});
+
+/* ═══════════════════════════════════════════════════
+   SHEET STATE
+═══════════════════════════════════════════════════ */
+const SHEET_STATES = ['peek','half','full'];
+let sheetState = 'peek';
+
+function toggleSheet() {
+  const idx = SHEET_STATES.indexOf(sheetState);
+  sheetState = SHEET_STATES[(idx + 1) % SHEET_STATES.length];
+  applySheetState();
+}
+
+function applySheetState() {
+  const sheet = document.getElementById('bottomSheet');
+  sheet.classList.remove('peek','half','full');
+  sheet.classList.add(sheetState);
+  // Move FAB and status bar accordingly
+  const fab = document.getElementById('fabGroup');
+  const statusBar = document.getElementById('statusBar');
+  const sheetHeights = { peek:'82px', half:'calc(52dvh + 10px)', full:'calc(80dvh + 10px)' };
+  const h = sheetHeights[sheetState];
+  fab.style.bottom = `calc(${h} + var(--safe-bottom))`;
+  statusBar.style.bottom = `calc(${h} + var(--safe-bottom))`;
+}
+
+function openSheetHalf() {
+  if (sheetState === 'peek') { sheetState = 'half'; applySheetState(); }
+}
+
+/* ═══════════════════════════════════════════════════
+   SIDE PANEL
+═══════════════════════════════════════════════════ */
+function toggleSidePanel() {
+  const p = document.getElementById('sidePanel');
+  const b = document.getElementById('backdrop');
+  if (p.classList.contains('open')) { closeSidePanel(); }
+  else { p.classList.add('open'); b.classList.add('on'); }
+}
+
+function closeSidePanel() {
+  document.getElementById('sidePanel').classList.remove('open');
+  document.getElementById('backdrop').classList.remove('on');
+}
+
+/* ═══════════════════════════════════════════════════
+   RADIUS CHIPS
+═══════════════════════════════════════════════════ */
+let selectedRadius = 500;
+function setRadius(r, el) {
+  selectedRadius = r;
+  document.querySelectorAll('.radius-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+/* ═══════════════════════════════════════════════════
+   API KEYS
+═══════════════════════════════════════════════════ */
+const KAKAO_KEY  = 'daedb9cca73372dcfaf626b39bef63f3';
+const VWORLD_KEY = ' F781960D-00D4-30EB-A0EA-D4051FFAE5F4';
+const BLD_KEY    = 'ac91064e6b1a5db4893d6937d9d368814e53156a80479c707b535f350df23318';
+
+/* ═══════════════════════════════════════════════════
+   MAP & STATE
+═══════════════════════════════════════════════════ */
+let map = null;
+let polygons = [], labels = [], infoWindows = [];
+let centerMarker = null, radiusCircle = null;
+let addrParcelPoly = null;
+let allFeaturesGlobal = [], selectedIndices = [];
+let _addrTurfGeom = null, _addrTurfLine = null, _searchPoint = null;
+let distanceLine = null, distanceEndpoints = [];
+let reverseAptPolygons = [], reverseAptLabels = [];
+let _aptSearchId = 0;
+let eduAbsolutePolygons = [], eduRelativePolygons = [];
+let shadowBuildings = [], shadowBldPolygons = [], shadowCastPolygons = [];
+let shadowAnimTimer = null, shadowAnimRunning = false;
+let _shadowLat = null, _shadowLng = null, _shadowBldOverlay = null;
+
+function initMap() {
+  if (map) return;
+  window._vwKey = VWORLD_KEY;
+  window._bldKey = BLD_KEY;
+  const s = document.createElement('script');
+  s.src = `//dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&libraries=services&autoload=false`;
+  s.onload = () => {
+    kakao.maps.load(() => {
+      map = new kakao.maps.Map(document.getElementById('map'), {
+        center: new kakao.maps.LatLng(37.3832, 126.6565), level: 5
+      });
+      map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+      setStatus('지도 로드 완료');
+    });
+  };
+  document.head.appendChild(s);
+}
+
+function toggleCadastral(el) {
+  el.checked
+    ? map.addOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT)
+    : map.removeOverlayMapTypeId(kakao.maps.MapTypeId.USE_DISTRICT);
+}
+function toggleSkyview(el) {
+  map.setMapTypeId(el.checked ? kakao.maps.MapTypeId.HYBRID : kakao.maps.MapTypeId.ROADMAP);
+}
+
+/* ═══════════════════════════════════════════════════
+   MAIN SEARCH
+═══════════════════════════════════════════════════ */
+async function doSearch() {
+  if (!map) return;
+  const addr = document.getElementById('addrInput').value.trim();
+  const radius = selectedRadius;
+  if (!addr) { alert('주소를 입력해주세요.'); return; }
+  closeSidePanel();
+  showLoading(true, '좌표 및 지적 정보 변환 중...');
+  clearAll();
+  try {
+    const coord = await geocode(addr);
+    if (!coord) { alert('주소를 찾을 수 없습니다.'); return; }
+    const center = new kakao.maps.LatLng(coord.lat, coord.lng);
+    map.setCenter(center);
+    map.setLevel(4);
+    placeCenterPin(center, addr);
+    drawRadiusCircle(center, radius);
+
+    let allResults = [];
+    setLoadingMsg('부지 지적 분석 중...');
+    const addrFeature = await queryAddressParcel(coord.lat, coord.lng);
+    const addrGeomData = addrFeature?.geometry || null;
+    const addrParcelProps = addrFeature?.properties || null;
+    const parcelPnu = addrParcelProps?.pnu || addrParcelProps?.PNU || '';
+
+    _addrTurfGeom = null; _addrTurfLine = null;
+    _searchPoint = turf.point([coord.lng, coord.lat]);
+    let parcelArea = 0;
+
+    if (addrGeomData) {
+      drawAddressParcel(addrGeomData);
+      try {
+        if (addrGeomData.type === 'Polygon') _addrTurfGeom = turf.polygon(addrGeomData.coordinates);
+        else if (addrGeomData.type === 'MultiPolygon') _addrTurfGeom = turf.multiPolygon(addrGeomData.coordinates);
+        if (_addrTurfGeom) {
+          parcelArea = turf.area(_addrTurfGeom);
+          let lineCoords = [];
+          if (addrGeomData.type === 'Polygon') lineCoords = addrGeomData.coordinates;
+          else if (addrGeomData.type === 'MultiPolygon') addrGeomData.coordinates.forEach(p => lineCoords.push(...p));
+          _addrTurfLine = turf.multiLineString(lineCoords);
+        }
+      } catch(e) { _addrTurfGeom = null; _addrTurfLine = null; }
+    }
+
+    setLoadingMsg('용도지역 조회 중...');
+    let centerLat = coord.lat, centerLng = coord.lng;
+    if (_addrTurfGeom) {
+      try {
+        const ptInside = turf.pointOnFeature(_addrTurfGeom);
+        centerLng = ptInside.geometry.coordinates[0];
+        centerLat = ptInside.geometry.coordinates[1];
+      } catch(e) {
+        const centroid = turf.centroid(_addrTurfGeom);
+        centerLng = centroid.geometry.coordinates[0];
+        centerLat = centroid.geometry.coordinates[1];
+      }
+    }
+    const landUseName = await queryLandUse(centerLat, centerLng);
+
+    let targetBldData = null;
+    if (window._bldKey) {
+      setLoadingMsg('건축물대장 조회 중...');
+      let bldParams = null;
+      const kakaoAddr = coord.kakaoAddress;
+      if (kakaoAddr && kakaoAddr.b_code) {
+        const bCode = kakaoAddr.b_code;
+        bldParams = {
+          sigunguCd: bCode.slice(0, 5), bjdongCd: bCode.slice(5, 10),
+          platGbCd: kakaoAddr.mountain_yn === 'Y' ? '1' : '0',
+          bun: String(parseInt(kakaoAddr.main_address_no) || 0).padStart(4, '0'),
+          ji: String(parseInt(kakaoAddr.sub_address_no || '0') || 0).padStart(4, '0'),
+        };
+      } else if (parcelPnu) {
+        bldParams = parseBdMgtSn(parcelPnu);
+      }
+      if (bldParams) {
+        const [recapItems, titleStats] = await Promise.all([
+          fetchBldRgstRecapAll(bldParams), fetchBldRgstTitleInfo(bldParams)
+        ]);
+        if (recapItems && recapItems.length > 0)
+          targetBldData = { items: recapItems, maxFlr: titleStats?.maxFlr || 0, maxHgt: titleStats?.maxHgt || 0 };
+      }
+    }
+
+    function getMinDistToSchool(schoolGeom) {
+      try {
+        let schoolLineCoords = [];
+        if (schoolGeom.type === 'Polygon') schoolLineCoords = schoolGeom.coordinates;
+        else if (schoolGeom.type === 'MultiPolygon') schoolGeom.coordinates.forEach(p => schoolLineCoords.push(...p));
+        else return { dist: Infinity, ptAddr: null, ptSchool: null };
+        const schoolPoly = schoolGeom.type === 'Polygon' ? turf.polygon(schoolGeom.coordinates) : turf.multiPolygon(schoolGeom.coordinates);
+        const schoolLine = turf.multiLineString(schoolLineCoords);
+        let minDist = Infinity, bestPtAddr = null, bestPtSchool = null;
+        if (_addrTurfLine && _addrTurfGeom) {
+          if (turf.booleanIntersects(_addrTurfGeom, schoolPoly)) return { dist: 0, ptAddr: null, ptSchool: null };
+          turf.coordEach(_addrTurfGeom, pt => { const p = turf.point(pt); const n = turf.nearestPointOnLine(schoolLine, p); const d = turf.distance(p, n, { units: 'meters' }); if (d < minDist) { minDist = d; bestPtAddr = pt; bestPtSchool = n.geometry.coordinates; } });
+          turf.coordEach(schoolPoly, pt => { const p = turf.point(pt); const n = turf.nearestPointOnLine(_addrTurfLine, p); const d = turf.distance(p, n, { units: 'meters' }); if (d < minDist) { minDist = d; bestPtSchool = pt; bestPtAddr = n.geometry.coordinates; } });
+        } else {
+          if (turf.booleanPointInPolygon(_searchPoint, schoolPoly)) return { dist: 0, ptAddr: null, ptSchool: null };
+          const nearest = turf.nearestPointOnLine(schoolLine, _searchPoint);
+          minDist = turf.distance(_searchPoint, nearest, { units: 'meters' });
+          bestPtAddr = _searchPoint.geometry.coordinates;
+          bestPtSchool = nearest.geometry.coordinates;
+        }
+        return { dist: minDist, ptAddr: bestPtAddr, ptSchool: bestPtSchool };
+      } catch(e) { return { dist: Infinity, ptAddr: null, ptSchool: null }; }
+    }
+
+    setLoadingMsg('주변 학교 지적 스캔 중...');
+    const schoolFeatures = await queryLandData(coord.lat, coord.lng, radius, 'school');
+    const schoolPOIs = await querySchoolPlaces(coord.lat, coord.lng, Math.min(radius + 500, 5000));
+
+    const validSchoolFeatures = schoolFeatures.filter(f => {
+      const c = getPolygonCenter(f.geometry);
+      f.type = 'school'; f.centerLat = c.lat; f.centerLng = c.lng; f.title = null;
+      const result = getMinDistToSchool(f.geometry);
+      f.distance = Math.round(result.dist); f.nearPtAddr = result.ptAddr; f.nearPtSchool = result.ptSchool;
+      return result.dist <= radius;
+    });
+
+    const normalizeName = name => name.replace(/\s*(교무실|체육관|학생식당|운동장|도서관|주차장|별관|본관|강당|수영장|급식실|행정실|방송실|다목적실|야구장|정문|후문|관리동|보건실|도서실|합창실|창고|사택|숙직실|방호실|주무실|탁구장)\s*$/, '').trim();
+    const poiClusters = new Map();
+    schoolPOIs.forEach(poi => { const norm = normalizeName(poi.place_name); if (!poiClusters.has(norm)) poiClusters.set(norm, []); poiClusters.get(norm).push(poi); });
+
+    const clusterPairs = [];
+    poiClusters.forEach((pois, normName) => {
+      validSchoolFeatures.forEach((f, fi) => {
+        let minD = Infinity;
+        pois.forEach(poi => { const d = getDistance(f.centerLat, f.centerLng, +poi.y, +poi.x); if (d < minD) minD = d; });
+        if (minD < 500) clusterPairs.push({ normName, fi, d: minD });
+      });
+    });
+    clusterPairs.sort((a, b) => a.d - b.d);
+    const usedFi = new Set(), usedClusters = new Set();
+    clusterPairs.forEach(({ normName, fi }) => {
+      if (!usedFi.has(fi) && !usedClusters.has(normName)) { validSchoolFeatures[fi].title = normName; usedFi.add(fi); usedClusters.add(normName); }
+    });
+
+    const namedFs = validSchoolFeatures.filter(f => f.title);
+    validSchoolFeatures.forEach(f => {
+      if (!f.title && namedFs.length) {
+        let minD = 600, bestTitle = null;
+        namedFs.forEach(nf => { const d = getDistance(f.centerLat, f.centerLng, nf.centerLat, nf.centerLng); if (d < minD) { minD = d; bestTitle = nf.title; } });
+        if (bestTitle) f.title = bestTitle;
+      }
+    });
+
+    allResults = validSchoolFeatures;
+    allResults.sort((a, b) => a.distance - b.distance);
+    allFeaturesGlobal = allResults;
+
+    const nearestSchoolDist = allResults.length > 0 ? allResults[0].distance : null;
+    renderParcelInfo(landUseName, parcelArea, nearestSchoolDist, targetBldData);
+    renderResults(allResults, center, radius);
+
+    if (allResults.length > 0) {
+      setLoadingMsg('교육환경보호구역 분석 중...');
+      await drawEduProtectionZones(allFeaturesGlobal);
+    }
+
+    const schoolCount = new Set(allResults.map(f => f.title)).size;
+    document.getElementById('resultCount').textContent = schoolCount;
+    setStatus(`반경 내 학교 ${schoolCount}개`);
+    _shadowLat = coord.lat; _shadowLng = coord.lng;
+    document.getElementById('shadowModeBtn').style.display = 'flex';
+    openSheetHalf();
+  } catch(e) { console.error(e); setStatus('오류 발생'); }
+  finally { showLoading(false); }
+}
+
+/* ═══════════════════════════════════════════════════
+   VWORLD API
+═══════════════════════════════════════════════════ */
+async function queryLandUse(lat, lng) {
+  const ZONE_KEYWORDS = ['전용주거지역','일반주거지역','준주거지역','중심상업지역','일반상업지역','근린상업지역','유통상업지역','전용공업지역','일반공업지역','준공업지역','보전녹지지역','생산녹지지역','자연녹지지역','계획관리지역','생산관리지역','보전관리지역','농림지역','자연환경보전지역','주거지역','상업지역','공업지역','녹지지역','관리지역'];
+  const getName = p => (p.prpos_area_dnm || p.uq_nm || p.uname || p.mnm || p.dnm || '').trim();
+  const fetchLayer = async (layerName) => {
+    const url = new URL('https://api.vworld.kr/req/data');
+    url.searchParams.set('service','data'); url.searchParams.set('request','GetFeature');
+    url.searchParams.set('data',layerName); url.searchParams.set('key',window._vwKey);
+    url.searchParams.set('domain',window.location.origin||'http://localhost');
+    url.searchParams.set('geomFilter',`POINT(${lng} ${lat})`);
+    url.searchParams.set('geometry','false'); url.searchParams.set('attribute','true');
+    url.searchParams.set('size','20');
+    try { const res = await pFetch(url.toString()); const json = await res.json(); if (json.response?.status==='OK'&&json.response.result) return json.response.result.featureCollection?.features??[]; } catch(e) {}
+    return [];
+  };
+  const features1 = await fetchLayer('lt_c_uszoning');
+  for (const f of features1) { const name = getName(f.properties); if (name && ZONE_KEYWORDS.some(k=>name.includes(k))) return name; }
+  const features2 = await fetchLayer('lp_uq_111');
+  for (const f of features2) { const name = getName(f.properties); if (name && ZONE_KEYWORDS.some(k=>name.includes(k))) return name; }
+  for (const f of [...features1,...features2]) { const name = getName(f.properties); if (name) return name; }
+  return '확인 불가';
+}
+
+async function fetchWfsChunk(minX, minY, maxX, maxY, targetType) {
+  const layerName = targetType === 'school' ? 'lp_pa_cbnd_bubun' : 'lt_c_bldginfo';
+  const url = new URL('https://api.vworld.kr/req/data');
+  url.searchParams.set('service','data'); url.searchParams.set('request','GetFeature');
+  url.searchParams.set('data',layerName); url.searchParams.set('key',window._vwKey);
+  url.searchParams.set('domain',window.location.origin||'http://localhost');
+  url.searchParams.set('geomFilter',`BOX(${minX},${minY},${maxX},${maxY})`);
+  url.searchParams.set('geometry','true'); url.searchParams.set('attribute','true');
+  url.searchParams.set('crs','EPSG:4326'); url.searchParams.set('size','1000');
+  try {
+    const res = await pFetch(url.toString()); const json = await res.json();
+    if (json.response?.status==='OK'&&json.response.result) {
+      const features = json.response.result.featureCollection.features;
+      return features.filter(f => { if (targetType==='school') { const jibun=(f.properties.jibun||'').trim(); return jibun.endsWith('학')||jibun.includes('학교'); } return true; });
+    }
+  } catch(e) {}
+  return [];
+}
+
+async function queryAddressParcel(lat, lng) {
+  const url = new URL('https://api.vworld.kr/req/data');
+  url.searchParams.set('service','data'); url.searchParams.set('request','GetFeature');
+  url.searchParams.set('data','lp_pa_cbnd_bubun'); url.searchParams.set('key',window._vwKey);
+  url.searchParams.set('domain',window.location.origin||'http://localhost');
+  url.searchParams.set('geomFilter',`POINT(${lng} ${lat})`);
+  url.searchParams.set('geometry','true'); url.searchParams.set('attribute','true');
+  url.searchParams.set('crs','EPSG:4326');
+  try { const res = await pFetch(url.toString()); const json = await res.json(); if (json.response?.status==='OK'&&json.response.result) { const features = json.response.result.featureCollection?.features; if (features?.length) return features[0]; } } catch(e) {}
+  return null;
+}
+
+/* ═══════════════════════════════════════════════════
+   BUILDING HUB API
+═══════════════════════════════════════════════════ */
+async function fetchBldRgstRecapAll(params) {
+  if (!window._bldKey || !params) return null;
+  try {
+    const url = new URL('https://apis.data.go.kr/1613000/BldRgstHubService/getBrRecapTitleInfo');
+    url.searchParams.set('ServiceKey',window._bldKey); url.searchParams.set('sigunguCd',params.sigunguCd);
+    url.searchParams.set('bjdongCd',params.bjdongCd); url.searchParams.set('platGbCd',params.platGbCd);
+    url.searchParams.set('bun',params.bun); url.searchParams.set('ji',params.ji);
+    url.searchParams.set('numOfRows','10'); url.searchParams.set('pageNo','1'); url.searchParams.set('_type','json');
+    const res = await pFetch(url.toString()); const text = await res.text();
+    if (text.startsWith('<') || text.toLowerCase().includes('forbidden')) return null;
+    const json = JSON.parse(text);
+    if (json?.response?.header?.resultCode !== '00') return null;
+    const itemsObj = json?.response?.body?.items?.item;
+    if (!itemsObj) return null;
+    return Array.isArray(itemsObj) ? itemsObj : [itemsObj];
+  } catch(e) { return null; }
+}
+
+async function fetchBldRgstTitleInfo(params) {
+  if (!window._bldKey || !params) return null;
+  try {
+    const url = new URL('https://apis.data.go.kr/1613000/BldRgstHubService/getBrTitleInfo');
+    url.searchParams.set('ServiceKey',window._bldKey); url.searchParams.set('sigunguCd',params.sigunguCd);
+    url.searchParams.set('bjdongCd',params.bjdongCd); url.searchParams.set('platGbCd',params.platGbCd);
+    url.searchParams.set('bun',params.bun); url.searchParams.set('ji',params.ji);
+    url.searchParams.set('numOfRows','100'); url.searchParams.set('pageNo','1'); url.searchParams.set('_type','json');
+    const res = await pFetch(url.toString()); const text = await res.text();
+    if (text.startsWith('<') || text.toLowerCase().includes('forbidden')) return null;
+    const json = JSON.parse(text);
+    if (json?.response?.header?.resultCode !== '00') return null;
+    const itemsObj = json?.response?.body?.items?.item;
+    if (!itemsObj) return null;
+    const items = Array.isArray(itemsObj) ? itemsObj : [itemsObj];
+    let maxFlr = 0, maxHgt = 0;
+    items.forEach(t => { const f=parseFloat(t.grndFlrCnt)||0; const h=parseFloat(t.hgt)||0; if(f>maxFlr)maxFlr=f; if(h>maxHgt)maxHgt=h; });
+    return { maxFlr, maxHgt };
+  } catch(e) { return null; }
+}
+
+async function fetchBldRgstRecap(params) {
+  if (!window._bldKey || !params) return null;
+  try {
+    const url = new URL('https://apis.data.go.kr/1613000/BldRgstHubService/getBrRecapTitleInfo');
+    url.searchParams.set('ServiceKey',window._bldKey); url.searchParams.set('sigunguCd',params.sigunguCd);
+    url.searchParams.set('bjdongCd',params.bjdongCd); url.searchParams.set('platGbCd',params.platGbCd);
+    url.searchParams.set('bun',params.bun); url.searchParams.set('ji',params.ji);
+    url.searchParams.set('numOfRows','1'); url.searchParams.set('pageNo','1'); url.searchParams.set('_type','json');
+    const res = await pFetch(url.toString()); const json = await res.json();
+    if (json?.response?.header?.resultCode !== '00') return null;
+    const items = json?.response?.body?.items?.item;
+    if (!items) return null;
+    return Array.isArray(items) ? items[0] : items;
+  } catch(e) { return null; }
+}
+
+/* ═══════════════════════════════════════════════════
+   UTILS
+═══════════════════════════════════════════════════ */
+function parseBdMgtSn(sn) {
+  if (!sn || sn.length < 19) return null;
+  return { sigunguCd:sn.substring(0,5), bjdongCd:sn.substring(5,10), platGbCd:sn.substring(10,11), bun:sn.substring(11,15), ji:sn.substring(15,19) };
+}
+function getDistance(lat1,lon1,lat2,lon2) { const p=0.017453292519943295; const c=Math.cos; const a=0.5-c((lat2-lat1)*p)/2+c(lat1*p)*c(lat2*p)*(1-c((lon2-lon1)*p))/2; return 12742000*Math.asin(Math.sqrt(a)); }
+function getPolygonCenter(geom) { let pts=[]; if(geom.type==='Polygon')pts=geom.coordinates[0]; else if(geom.type==='MultiPolygon')pts=geom.coordinates[0][0]; if(!pts||!pts.length)return{lat:0,lng:0}; let sumX=0,sumY=0; pts.forEach(p=>{sumX+=p[0];sumY+=p[1];}); return{lng:sumX/pts.length,lat:sumY/pts.length}; }
+function geocode(addr) {
+  return new Promise(resolve => {
+    new kakao.maps.services.Geocoder().addressSearch(addr, (res,st) => {
+      if (st===kakao.maps.services.Status.OK&&res.length) return resolve({lat:+res[0].y,lng:+res[0].x,kakaoAddress:res[0].address||null});
+      new kakao.maps.services.Places().keywordSearch(addr, (r2,s2) => {
+        if(s2===kakao.maps.services.Status.OK&&r2.length) resolve({lat:+r2[0].y,lng:+r2[0].x,kakaoAddress:null});
+        else resolve(null);
+      });
+    });
+  });
+}
+function querySchoolPlaces(lat,lng,radius) {
+  return new Promise(resolve => {
+    const ps=new kakao.maps.services.Places(); let allPlaces=[];
+    const center=new kakao.maps.LatLng(lat,lng);
+    function searchPage(page) {
+      ps.categorySearch('SC4',(data,status,pagination)=>{
+        if(status===kakao.maps.services.Status.OK){allPlaces=allPlaces.concat(data); if(pagination.hasNextPage)searchPage(page+1); else resolve(allPlaces);}else resolve(allPlaces);
+      },{location:center,radius,page,size:15});
+    }
+    searchPage(1);
+  });
+}
+async function queryLandData(lat,lng,radiusM,targetType) {
+  const deg=1/111000; const tLat=(radiusM*2)*deg,tLng=(radiusM*2)*deg/Math.cos(lat*Math.PI/180);
+  const sX=lng-tLng/2,sY=lat-tLat/2; const stX=tLng/4,stY=tLat/4;
+  const bboxes=[];
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++)bboxes.push({minX:sX+stX*i,maxX:sX+stX*(i+1),minY:sY+stY*j,maxY:sY+stY*(j+1)});
+  const results=await Promise.all(bboxes.map(b=>fetchWfsChunk(b.minX,b.minY,b.maxX,b.maxY,targetType)));
+  const seenId=new Set(); const uniqueFeatures=[];
+  results.flat().forEach(f=>{const id=f.properties?.pnu||f.properties?.PNU; if(id&&!seenId.has(id)){seenId.add(id);uniqueFeatures.push(f);}});
+  return uniqueFeatures;
+}
+
+/* ═══════════════════════════════════════════════════
+   RENDER PARCEL INFO
+═══════════════════════════════════════════════════ */
+function renderParcelInfo(landUseName, area, nearestSchoolDist, targetBldData) {
+  const infoDiv = document.getElementById('targetParcelInfo');
+  if (!area) { infoDiv.innerHTML = ''; return; }
+
+  let eduZoneLabel='—', eduZoneColor='var(--text3)', eduZoneBg='var(--surface3)', eduZoneBorder='var(--border)';
+  if (nearestSchoolDist !== null && nearestSchoolDist !== undefined) {
+    if (nearestSchoolDist <= 50) { eduZoneLabel=`⛔ 절대보호구역`; eduZoneColor='var(--warn)'; eduZoneBg='rgba(255,95,95,0.08)'; eduZoneBorder='rgba(255,95,95,0.3)'; }
+    else if (nearestSchoolDist <= 200) { eduZoneLabel=`⚠️ 상대보호구역`; eduZoneColor='var(--yellow)'; eduZoneBg='rgba(245,183,49,0.08)'; eduZoneBorder='rgba(245,183,49,0.3)'; }
+    else { eduZoneLabel=`✅ 보호구역 외`; eduZoneColor='var(--green)'; eduZoneBg='rgba(52,201,122,0.07)'; eduZoneBorder='rgba(52,201,122,0.25)'; }
+  }
+  const distStr = nearestSchoolDist !== null ? `최근접 ${nearestSchoolDist}m` : '';
+
+  const FIELD_GUIDE = [
+    {key:'bldNm',label:'건물명'},{key:'mainPurpsCdNm',label:'주용도'},{key:'useAprDay',label:'사용승인일'},
+    {key:'platArea',label:'대지면적'},{key:'archArea',label:'건축면적'},{key:'totArea',label:'연면적'},
+    {key:'bcRat',label:'건폐율 (%)'},{key:'vlRat',label:'용적률 (%)'},{key:'grndFlrCnt',label:'최고 층수'},
+    {key:'hgt',label:'최고 높이'},{key:'hhldCnt',label:'세대수'},{key:'totPkngCnt',label:'주차대수'},{key:'mainBldCnt',label:'주건축물수'}
+  ];
+
+  function buildRecapCards(items, maxFlr, maxHgt) {
+    return items.map((raw,idx) => {
+      const item = Object.assign({}, raw);
+      if (maxFlr > 0) item.grndFlrCnt = maxFlr;
+      if (maxHgt > 0) item.hgt = maxHgt;
+      const cells = FIELD_GUIDE.map(g => {
+        let rawVal = item[g.key]; let val = (rawVal!==undefined&&rawVal!==null&&rawVal!=='') ? String(rawVal) : '—';
+        let color = val==='—' ? 'var(--text3)' : 'var(--text)';
+        if (val !== '—') {
+          if (['totArea','archArea','platArea'].includes(g.key)) { const n=parseFloat(val); if(!isNaN(n))val=n.toLocaleString('ko-KR')+' ㎡'; color='var(--green)'; }
+          else if (['vlRat','bcRat'].includes(g.key)) { color='var(--yellow)'; }
+          else if (g.key==='grndFlrCnt') { val+=` 층`; color='var(--accent)'; }
+          else if (g.key==='hgt') { val+=` m`; color='var(--accent)'; }
+          else if (g.key==='hhldCnt') { const n=parseFloat(val); if(!isNaN(n))val=n.toLocaleString('ko-KR')+' 세대'; }
+          else if (g.key==='useAprDay'&&val.length===8) { const age=new Date().getFullYear()-parseInt(val.substring(0,4))+1; val=`${val.substring(0,4)}.${val.substring(4,6)}.${val.substring(6,8)} (${age}년차)`; color='var(--green)'; }
+          else if (g.key==='totPkngCnt') { const pn=parseFloat(val),hn=parseFloat(item['hhldCnt']); if(!isNaN(pn)){val=pn.toLocaleString('ko-KR')+'대'; if(!isNaN(hn)&&hn>0)val+=` (세대당 ${(pn/hn).toFixed(2)}대)`;} }
+        }
+        return `<div class="bld-recap-cell"><div class="bld-recap-k">${g.label}</div><div class="bld-recap-v" style="color:${color}">${val}</div></div>`;
+      }).join('');
+      return `<div class="bld-recap-card">
+        <div class="bld-recap-head"><span class="bld-recap-name">${item.bldNm||'단지명 없음'}</span><span style="font-size:10px;color:var(--text3)">#${idx+1}</span></div>
+        <div class="bld-recap-grid">${cells}</div>
+      </div>`;
+    }).join('');
+  }
+
+  const bldSection = targetBldData?.items?.length
+    ? `<div style="margin-top:12px;">
+        <div class="parcel-info-title">🏛 건축물대장 <span class="source-badge">건축HUB</span></div>
+        ${buildRecapCards(targetBldData.items, targetBldData.maxFlr, targetBldData.maxHgt)}
+        <div style="font-size:10px;color:var(--text3);margin-top:8px;line-height:1.5;">※ 층수·높이는 전체동 최고값 기준</div>
+      </div>`
+    : `<div style="background:var(--surface3);border:1px dashed var(--border);border-radius:10px;padding:14px;text-align:center;margin-top:10px;font-size:12px;color:var(--text3);">🏛 건축물대장 정보 없음<br><span style="font-size:10px;">(단독·소규모 또는 미등록)</span></div>`;
+
+  infoDiv.innerHTML = `
+    <div class="parcel-info-card">
+      <div class="parcel-info-title">📋 대상 부지 현황</div>
+      <div class="parcel-row">
+        <span class="parcel-row-k">법정 용도지역</span>
+        <b class="parcel-row-v" style="color:var(--accent)">${landUseName}</b>
+      </div>
+      <div class="parcel-row">
+        <span class="parcel-row-k">지적 대지면적</span>
+        <b class="parcel-row-v">${Math.round(area).toLocaleString()} ㎡</b>
+      </div>
+      <div class="edu-zone-badge" style="background:${eduZoneBg};border:1px solid ${eduZoneBorder};">
+        <div>
+          <div class="ez-label" style="color:${eduZoneColor}">${eduZoneLabel}</div>
+          <div class="ez-sub" style="color:${eduZoneColor}">${distStr} | 절대(~50m) / 상대(~200m)</div>
+        </div>
+      </div>
+      ${bldSection}
+    </div>`;
+}
+
+/* ═══════════════════════════════════════════════════
+   RENDER SCHOOL RESULTS
+═══════════════════════════════════════════════════ */
+function renderResults(features, center, radius) {
+  const listWrapper = document.getElementById('schoolListWrapper');
+  if (!features.length) {
+    listWrapper.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🔍</div><div class="empty-state-text">반경 내 학교용지가 없습니다</div></div>`;
+    return;
+  }
+  const bounds = new kakao.maps.LatLngBounds(); bounds.extend(center);
+  features.forEach((f,i) => { const poly = drawPolygon(f,i); if(poly){try{poly.getPath()?.forEach(pt=>bounds.extend(pt));}catch(e){}} });
+
+  const schoolMap = new Map();
+  features.forEach((f,i) => { const key=f.title||'학교용지(미정)'; if(!schoolMap.has(key))schoolMap.set(key,[]); schoolMap.get(key).push(i); });
+
+  let html = '';
+  schoolMap.forEach((indices,name) => {
+    const f=features[indices[0]], p=f.properties, jibun=p.jibun||p.JIBUN||'-';
+    const multiLabel = indices.length>1 ? `<span class="parcel-count-badge">${indices.length}필지</span>` : '';
+    html += `<div class="school-card" id="card-school-${indices[0]}" onclick="focusSchool([${indices.join(',')}],${indices[0]})">
+      <div class="school-card-top">
+        <span class="school-tag">🏫 학교용지${multiLabel}</span>
+        <span class="school-dist">${f.distance}m</span>
+      </div>
+      <div class="school-name">🎓 ${name}</div>
+      <div class="school-jibun">지번: ${jibun}</div>
+    </div>`;
+  });
+  listWrapper.innerHTML = html;
+  map.setBounds(bounds, 80);
+}
+
+function drawPolygon(f, idx) {
+  const geom = f.geometry; if (!geom) return null;
+  const toPath = coords => coords.map(c => new kakao.maps.LatLng(c[1], c[0]));
+  let paths = [];
+  if (geom.type==='Polygon') paths=[toPath(geom.coordinates[0])];
+  else if (geom.type==='MultiPolygon') paths=geom.coordinates.map(p=>toPath(p[0]));
+  const poly = new kakao.maps.Polygon({ map, path:paths, strokeWeight:2, strokeColor:'#b76eff', strokeOpacity:1.0, fillColor:'#b76eff', fillOpacity:0.35 });
+  if (f.title) {
+    const label = new kakao.maps.CustomOverlay({ position:new kakao.maps.LatLng(f.centerLat,f.centerLng), content:`<div class="map-label school">🎓 ${f.title}</div>`, yAnchor:0.5 });
+    label.setMap(map); labels.push(label);
+  }
+  f.polygonObj=poly; f._origColor='#b76eff'; f._origOpacity=0.35; polygons.push(poly); return poly;
+}
+
+function focusSchool(indices, cardRepIdx) {
+  document.querySelectorAll('.school-card.selected').forEach(el=>el.classList.remove('selected'));
+  allFeaturesGlobal.forEach(f=>{if(f.polygonObj)f.polygonObj.setOptions({strokeColor:f._origColor,strokeWeight:2,fillColor:f._origColor,fillOpacity:f._origOpacity});});
+  const card = document.getElementById(`card-school-${cardRepIdx}`);
+  if(card){card.classList.add('selected');card.scrollIntoView({behavior:'smooth',block:'nearest'});}
+  const b=new kakao.maps.LatLngBounds(); let hasPoints=false;
+  indices.forEach(i=>{
+    const f=allFeaturesGlobal[i]; if(!f||!f.polygonObj)return;
+    f.polygonObj.setOptions({strokeColor:'#ff8c3a',strokeWeight:3,fillColor:'#ff8c3a',fillOpacity:0.55});
+    try{const path=f.polygonObj.getPath(); if(path&&path.length){if(Array.isArray(path[0]))path.forEach(ring=>ring.forEach(pt=>{b.extend(pt);hasPoints=true;})); else path.forEach(pt=>{b.extend(pt);hasPoints=true;});}}catch(e){}
+  });
+  if(hasPoints){try{map.setBounds(b,80);}catch(e){}}
+  clearDistanceLine();
+  const nearF=allFeaturesGlobal[indices[0]]; if(!nearF)return;
+  let ptAddrCoord=nearF.nearPtAddr, ptSchoolCoord=nearF.nearPtSchool;
+  if(!ptAddrCoord||!ptSchoolCoord){
+    if(_addrTurfGeom){const c=turf.centroid(_addrTurfGeom);ptAddrCoord=c.geometry.coordinates;}
+    else if(_searchPoint){ptAddrCoord=_searchPoint.geometry.coordinates;}
+    ptSchoolCoord=[nearF.centerLng,nearF.centerLat];
+  }
+  if(ptAddrCoord&&ptSchoolCoord&&nearF.distance>0){
+    const ptA=new kakao.maps.LatLng(ptAddrCoord[1],ptAddrCoord[0]);
+    const ptS=new kakao.maps.LatLng(ptSchoolCoord[1],ptSchoolCoord[0]);
+    distanceLine=new kakao.maps.Polyline({map,path:[ptA,ptS],strokeWeight:2,strokeColor:'#ff8c3a',strokeOpacity:0.9,strokeStyle:'dashed'});
+    const dot=(color,label)=>`<div style="position:relative;width:14px;height:14px;"><div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;transform:translate(-50%,-50%);"></div><div style="position:absolute;top:-26px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:10px;font-weight:700;background:${color};color:white;padding:1px 5px;border-radius:3px;">${label}</div></div>`;
+    const addrLabel=_addrTurfGeom?'부지 끝':'중심점';
+    distanceEndpoints.push(new kakao.maps.CustomOverlay({map,position:ptA,content:dot('#00d4ff',addrLabel),zIndex:20}));
+    distanceEndpoints.push(new kakao.maps.CustomOverlay({map,position:ptS,content:dot('#b76eff','학교 끝'),zIndex:20}));
+    const midLat=(ptAddrCoord[1]+ptSchoolCoord[1])/2,midLng=(ptAddrCoord[0]+ptSchoolCoord[0])/2;
+    distanceEndpoints.push(new kakao.maps.CustomOverlay({map,position:new kakao.maps.LatLng(midLat,midLng),content:`<div style="background:#ff8c3a;color:white;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;">↔ ${nearF.distance}m</div>`,zIndex:20}));
+  }
+  if(document.getElementById('searchApt').checked) findAndShowNearbyApts(indices);
+  // Open bottom sheet to show results
+  if(sheetState==='peek'){sheetState='half';applySheetState();}
+}
+
+function clearDistanceLine() {
+  if(distanceLine){distanceLine.setMap(null);distanceLine=null;}
+  distanceEndpoints.forEach(e=>e.setMap(null)); distanceEndpoints=[];
+}
+
+/* ═══════════════════════════════════════════════════
+   APT SEARCH
+═══════════════════════════════════════════════════ */
+async function queryAptSingleBbox(lat,lng,radiusM) {
+  const deg=1/111000; const hLat=radiusM*deg,hLng=radiusM*deg/Math.cos(lat*Math.PI/180);
+  const features=await fetchWfsChunk(lng-hLng,lat-hLat,lng+hLng,lat+hLat,'apt');
+  const seenId=new Set();
+  return features.filter(f=>{let id=f.id||f.properties?.bd_mgt_sn||f.properties?.mgm_bldrgst_pk; if(!id){try{id=`${Math.round(f.geometry.coordinates[0][0][0]*1e5)}`;}catch(e){return true;}} if(seenId.has(id))return false; seenId.add(id);return true;});
+}
+
+async function findAndShowNearbyApts(schoolIndices) {
+  const myId=++_aptSearchId;
+  reverseAptPolygons.forEach(p=>p.setMap(null)); reverseAptPolygons=[];
+  reverseAptLabels.forEach(l=>l.setMap(null));   reverseAptLabels=[];
+  const schoolFeats=schoolIndices.map(i=>allFeaturesGlobal[i]).filter(Boolean);
+  if(!schoolFeats.length)return;
+  const rep=schoolFeats[0];
+  setStatus(`${rep.title||'학교'} 인근 단지 분석 중...`);
+  let schoolUnion=null;
+  schoolFeats.forEach(sf=>{try{const tg=sf.geometry.type==='Polygon'?turf.polygon(sf.geometry.coordinates):turf.multiPolygon(sf.geometry.coordinates); schoolUnion=schoolUnion?turf.union(schoolUnion,tg):tg;}catch(e){}});
+  if(!schoolUnion)return;
+  const schoolOutlineCoords=schoolUnion.geometry.type==='Polygon'?schoolUnion.geometry.coordinates:schoolUnion.geometry.coordinates.flat();
+  const schoolLine=turf.multiLineString(schoolOutlineCoords);
+  try {
+    const aptRaw=await queryAptSingleBbox(rep.centerLat,rep.centerLng,400);
+    if(myId!==_aptSearchId)return;
+    const normalizeComplexName=name=>name.replace(/\s*(제?\s*\d+\s*단지)\s*$/,'').replace(/\s*(\d+차)\s*단지\s*$/,'$1').trim();
+    const complexGroups=new Map(),complexRawNames=new Map();
+    aptRaw.forEach(f=>{const rawName=f.properties.bld_nm??f.properties.BLD_NM??f.properties.bldNm??'대형건축물'; const normName=normalizeComplexName(rawName); if(!complexGroups.has(normName)){complexGroups.set(normName,[]); complexRawNames.set(normName,new Set());} complexGroups.get(normName).push(f); complexRawNames.get(normName).add(rawName);});
+    let nearbyCount=0; const sidebarComplexes=[];
+    for(const[normName,feats]of complexGroups){
+      const maxFloors=Math.max(...feats.map(f=>Number(f.properties.grnd_flr??f.properties.GRND_FLR??0)));
+      const totalArea=feats.reduce((s,f)=>s+Number(f.properties.totar??f.properties.TOTAR??0),0);
+      const maxHeight=Math.max(...feats.map(f=>Number(f.properties.bd_hght??f.properties.BD_HGHT??0)));
+      const platArea=Math.max(...feats.map(f=>Number(f.properties.plat_area??f.properties.PLAT_AREA??0)));
+      const archArea=feats.reduce((s,f)=>s+Number(f.properties.arch_area??f.properties.ARCH_AREA??0),0);
+      const ugrndFlr=Math.max(...feats.map(f=>Number(f.properties.ugrnd_flr??f.properties.UGRND_FLR??0)));
+      const hhVworld=feats.reduce((s,f)=>s+Number(f.properties.hh??f.properties.HH??0),0);
+      const bdMgtSn=feats[0].properties.bd_mgt_sn||feats[0].properties.BD_MGT_SN||'';
+      if(maxFloors<21&&totalArea<100000)continue;
+      const rawNamesArr=[...(complexRawNames.get(normName)||[normName])];
+      const name=rawNamesArr.length>1?`${normName} (${rawNamesArr.length}단지 통합)`:(rawNamesArr[0]||normName);
+      let bufferedUnion=null;
+      feats.forEach(f=>{try{const tg=f.geometry.type==='Polygon'?turf.polygon(f.geometry.coordinates):turf.multiPolygon(f.geometry.coordinates); const buf=turf.buffer(tg,0.012,{units:'kilometers'}); bufferedUnion=bufferedUnion?turf.union(bufferedUnion,buf):buf;}catch(e){}});
+      if(!bufferedUnion)continue;
+      let complexUnion=bufferedUnion;
+      try{const shrunk=turf.buffer(bufferedUnion,-0.008,{units:'kilometers'}); if(shrunk)complexUnion=shrunk;}catch(e){}
+      const complexGeomCoords=complexUnion.geometry.type==='Polygon'?complexUnion.geometry.coordinates:complexUnion.geometry.coordinates.flat();
+      const complexLine=turf.multiLineString(complexGeomCoords);
+      let minDist=Infinity,ptComplex=null,ptSchool=null;
+      if(turf.booleanIntersects(complexUnion,schoolUnion)){minDist=0;}
+      else{turf.coordEach(complexUnion,pt=>{const p=turf.point(pt);const n=turf.nearestPointOnLine(schoolLine,p);const d=turf.distance(p,n,{units:'meters'}); if(d<minDist){minDist=d;ptComplex=pt;ptSchool=n.geometry.coordinates;}}); turf.coordEach(schoolUnion,pt=>{const p=turf.point(pt);const n=turf.nearestPointOnLine(complexLine,p);const d=turf.distance(p,n,{units:'meters'}); if(d<minDist){minDist=d;ptSchool=pt;ptComplex=n.geometry.coordinates;}});}
+      if(minDist>200)continue;
+      nearbyCount++; const distM=Math.round(minDist);
+      const toPath=coords=>coords.map(c=>new kakao.maps.LatLng(c[1],c[0]));
+      let paths=[];
+      if(complexUnion.geometry.type==='Polygon')paths=[toPath(complexUnion.geometry.coordinates[0])];
+      else if(complexUnion.geometry.type==='MultiPolygon')paths=complexUnion.geometry.coordinates.map(p=>toPath(p[0]));
+      const poly=new kakao.maps.Polygon({map,path:paths,strokeWeight:2,strokeColor:'#f5b731',strokeOpacity:1.0,fillColor:'#f5b731',fillOpacity:0.3});
+      reverseAptPolygons.push(poly);
+      const ctr=turf.centroid(complexUnion).geometry.coordinates;
+      const flrStr=maxFloors>0?`최고 ${maxFloors}층`:'';
+      const htStr=maxHeight>0?` · ${Math.round(maxHeight)}m`:'';
+      const areaStr=totalArea>0?`연면적 ${(totalArea/10000).toFixed(1)}만㎡`:'';
+      const platStr=platArea>0?`대지 ${Math.round(platArea).toLocaleString()}㎡`:'';
+      const estUnits=totalArea>0?Math.floor(totalArea*0.75/112):0;
+      const unitStr=estUnits>0?`추정 ${estUnits.toLocaleString()}세대`:'';
+      const line1=[flrStr+htStr,areaStr].filter(Boolean).join(' | ');
+      const line2=[platStr,unitStr].filter(Boolean).join(' | ');
+      reverseAptLabels.push(new kakao.maps.CustomOverlay({map,position:new kakao.maps.LatLng(ctr[1],ctr[0]),content:`<div class="map-label" style="border-color:#f5b731;color:#f5b731;background:rgba(13,15,20,.95);line-height:1.6;">🏢 ${name}<br><span style="font-size:10px;opacity:.9;">${line1}</span><br><span style="font-size:10px;opacity:.7;">${line2||''} | ↔학교 ${distM}m</span></div>`,yAnchor:0.5}));
+      if(ptComplex&&ptSchool&&minDist>0){const kakaoC=new kakao.maps.LatLng(ptComplex[1],ptComplex[0]);const kakaoS=new kakao.maps.LatLng(ptSchool[1],ptSchool[0]); reverseAptPolygons.push(new kakao.maps.Polyline({map,path:[kakaoC,kakaoS],strokeWeight:2,strokeColor:'#f5b731',strokeOpacity:0.9,strokeStyle:'dashed'}));}
+      sidebarComplexes.push({name,distM,maxFloors,ugrndFlr,totalArea,platArea,archArea,hhVworld,bdMgtSn});
+    }
+    setStatus(`${rep.title||'학교'} 200m 내 단지 ${nearbyCount}곳`);
+    renderAptCards(sidebarComplexes);
+  } catch(e) { console.error(e); setStatus('단지 검색 오류'); }
+}
+
+async function renderAptCards(complexes) {
+  const section=document.getElementById('aptListSection');
+  const list=document.getElementById('aptCardList');
+  if(!complexes.length){section.style.display='none';list.innerHTML='';return;}
+  section.style.display='block';
+  const fmt=(v,unit='㎡')=>v>0?`${Math.round(v).toLocaleString()}${unit}`:'—';
+  const fmtW=(v)=>v>0?`${(v/10000).toFixed(1)}만㎡`:'—';
+  list.innerHTML=complexes.map((c,i)=>`
+    <div class="apt-card">
+      <div class="apt-card-name">🏢 ${c.name}</div>
+      <div class="apt-card-dist">↔ 학교까지 ${c.distM}m</div>
+      <div class="apt-stat-grid">
+        <div class="apt-stat"><div class="apt-stat-k">연면적</div><div class="apt-stat-v gold">${fmtW(c.totalArea)}</div></div>
+        <div class="apt-stat"><div class="apt-stat-k">대지면적</div><div class="apt-stat-v">${fmt(c.platArea)}</div></div>
+        <div class="apt-stat"><div class="apt-stat-k">건축면적</div><div class="apt-stat-v">${fmt(c.archArea)}</div></div>
+        <div class="apt-stat"><div class="apt-stat-k">층수(지상/지하)</div><div class="apt-stat-v blue">${c.maxFloors>0?c.maxFloors+'층':'—'}${c.ugrndFlr>0?' / B'+c.ugrndFlr:''}</div></div>
+        <div class="apt-stat" style="grid-column:span 2"><div class="apt-stat-k">세대수</div>
+          <div class="apt-stat-v green" id="apt-hh-val-${i}">${c.hhVworld>0?`${c.hhVworld.toLocaleString()}세대`:`<span class="loading-badge">조회 중...</span>`}</div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  complexes.forEach(async (c,i) => {
+    const valEl=document.getElementById(`apt-hh-val-${i}`); if(!valEl)return;
+    const parsed=parseBdMgtSn(c.bdMgtSn);
+    if(!parsed){if(c.hhVworld===0)valEl.innerHTML='<span style="color:var(--text3)">정보없음</span>';return;}
+    try {
+      const item=await fetchBldRgstRecap(parsed); if(!item){if(c.hhVworld===0)valEl.innerHTML='<span style="color:var(--text3)">정보없음</span>';return;}
+      const hh=Number(item.hhldCnt??0);
+      if(hh>0) valEl.innerHTML=`${hh.toLocaleString()}세대 <span class="source-badge">건축대장</span>`;
+      else if(c.hhVworld>0) valEl.innerHTML=`${c.hhVworld.toLocaleString()}세대`;
+      else{const fam=Number(item.fmlyCnt??0); valEl.innerHTML=fam>0?`${fam.toLocaleString()}가구 <span class="source-badge">건축대장</span>`:'<span style="color:var(--text3)">정보없음</span>';}
+    } catch(e){if(c.hhVworld===0)valEl.innerHTML='<span style="color:var(--text3)">조회실패</span>';}
+  });
+}
+
+/* ═══════════════════════════════════════════════════
+   MAP HELPERS
+═══════════════════════════════════════════════════ */
+function drawAddressParcel(geom) {
+  if(addrParcelPoly){addrParcelPoly.setMap(null);addrParcelPoly=null;}
+  const toPath=coords=>coords.map(c=>new kakao.maps.LatLng(c[1],c[0]));
+  let paths=[];
+  if(geom.type==='Polygon')paths=[toPath(geom.coordinates[0])];
+  else if(geom.type==='MultiPolygon')paths=geom.coordinates.map(p=>toPath(p[0]));
+  addrParcelPoly=new kakao.maps.Polygon({map,path:paths,strokeWeight:3,strokeColor:'#4d9eff',strokeOpacity:1.0,fillColor:'#4d9eff',fillOpacity:0.1});
+}
+function drawRadiusCircle(center, radius) {
+  if(radiusCircle)radiusCircle.setMap(null);
+  radiusCircle=new kakao.maps.Circle({center,radius,strokeWeight:2,strokeColor:'#4d9eff',strokeOpacity:0.8,strokeStyle:'dashed',fillColor:'#4d9eff',fillOpacity:0.06});
+  radiusCircle.setMap(map);
+}
+function placeCenterPin(latlng, addr) {
+  if(centerMarker)centerMarker.setMap(null);
+  const img=new kakao.maps.MarkerImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 30 38"><ellipse cx="15" cy="36" rx="7" ry="2" fill="rgba(0,0,0,.4)"/><path d="M15 0C6.72 0 0 6.72 0 15c0 10 15 23 15 23S30 25 30 15C30 6.72 23.28 0 15 0z" fill="#ff5f5f"/><circle cx="15" cy="15" r="5" fill="white" opacity=".9"/></svg>`)}`,new kakao.maps.Size(32,40),{offset:new kakao.maps.Point(16,40)});
+  centerMarker=new kakao.maps.Marker({map,position:latlng,image:img});
+}
+function clearAll() {
+  polygons.forEach(p=>p.setMap(null));polygons=[];
+  labels.forEach(l=>l.setMap(null));labels=[];
+  infoWindows.forEach(iw=>iw.close());infoWindows=[];
+  if(centerMarker)centerMarker.setMap(null);centerMarker=null;
+  if(radiusCircle)radiusCircle.setMap(null);radiusCircle=null;
+  if(addrParcelPoly){addrParcelPoly.setMap(null);addrParcelPoly=null;}
+  clearDistanceLine();
+  reverseAptPolygons.forEach(p=>p.setMap(null));reverseAptPolygons=[];
+  reverseAptLabels.forEach(l=>l.setMap(null));reverseAptLabels=[];
+  eduAbsolutePolygons.forEach(p=>p.setMap(null));eduAbsolutePolygons=[];
+  eduRelativePolygons.forEach(p=>p.setMap(null));eduRelativePolygons=[];
+  exitShadowMode();
+  document.getElementById('shadowModeBtn').style.display='none';
+  document.getElementById('aptListSection').style.display='none';
+  document.getElementById('aptCardList').innerHTML='';
+  allFeaturesGlobal=[];selectedIndices=[];
+  _addrTurfGeom=null;_addrTurfLine=null;_searchPoint=null;
+  document.getElementById('schoolListWrapper').innerHTML=`<div class="empty-state"><div class="empty-state-icon">🗂</div><div class="empty-state-text">주소를 검색하면<br>분석 결과가 표시됩니다</div></div>`;
+  document.getElementById('targetParcelInfo').innerHTML='';
+  document.getElementById('resultCount').textContent='0';
+  sheetState='peek'; applySheetState();
+}
+function showLoading(on,msg){document.getElementById('loading').classList.toggle('on',on);if(msg)document.getElementById('loadingMsg').textContent=msg;}
+function setLoadingMsg(m){document.getElementById('loadingMsg').textContent=m;}
+function setStatus(m){document.getElementById('statusBar').textContent=m;}
+
+/* ═══════════════════════════════════════════════════
+   SOLAR SIMULATION
+═══════════════════════════════════════════════════ */
+async function activateShadowMode() {
+  if(!_shadowLat||!_shadowLng)return;
+  document.getElementById('shadowPanel').classList.add('active');
+  document.getElementById('shadowModeBtn').style.display='none';
+  // Insert shadow panel at top of sheet content
+  const sheetContent=document.getElementById('sheetContent');
+  const shadowPanel=document.getElementById('shadowPanel');
+  sheetContent.parentNode.insertBefore(shadowPanel,sheetContent);
+  shadowPanel.style.display='block';
+  if(sheetState==='peek'){sheetState='half';applySheetState();}
+  onShadowSlider(document.getElementById('shadowSlider'));
+  await loadShadowBuildings(_shadowLat,_shadowLng);
+}
+
+function exitShadowMode() {
+  clearInterval(shadowAnimTimer);shadowAnimRunning=false;
+  document.getElementById('shadowPlayBtn').textContent='▶ 재생';
+  shadowCastPolygons.forEach(p=>p.setMap(null));shadowCastPolygons=[];
+  shadowBldPolygons.forEach(p=>p.setMap(null));shadowBldPolygons=[];
+  shadowBuildings=[];
+  if(_shadowBldOverlay){_shadowBldOverlay.setMap(null);_shadowBldOverlay=null;}
+  document.getElementById('shadowPanel').classList.remove('active');
+  document.getElementById('shadowPanel').style.display='none';
+  document.getElementById('shadowCoverageBox').innerHTML='';
+  document.getElementById('sunInfoBar').textContent='태양 위치 계산 대기 중...';
+  if(_shadowLat)document.getElementById('shadowModeBtn').style.display='flex';
+}
+
+async function loadShadowBuildings(lat,lng) {
+  setStatus('일조 분석: 건물 데이터 로딩 중...');
+  shadowBldPolygons.forEach(p=>p.setMap(null));shadowBldPolygons=[];shadowBuildings=[];
+  const rad=300,degPerM=1/111000;
+  const hLat=rad*degPerM,hLng=rad*degPerM/Math.cos(lat*Math.PI/180);
+  const feats=await fetchWfsChunk(lng-hLng,lat-hLat,lng+hLng,lat+hLat,'apt');
+  shadowBuildings=feats.filter(f=>{const h=Number(f.properties.bd_hght??f.properties.BD_HGHT??0);const flr=Number(f.properties.grnd_flr??f.properties.GRND_FLR??0);return h>5||flr>=2;});
+  const toPath=cs=>cs.map(c=>new kakao.maps.LatLng(c[1],c[0]));
+  shadowBuildings.forEach(f=>{
+    if(!f.geometry)return;
+    const h=Number(f.properties.bd_hght??f.properties.BD_HGHT??0),flr=Number(f.properties.grnd_flr??f.properties.GRND_FLR??0);
+    f._height=h||flr*3.2;f._flr=flr;
+    const color=f._height>60?'#ff4444':f._height>30?'#ff9900':f._height>15?'#ffcc00':'#88ccff';
+    const geom=f.geometry; const polys=geom.type==='Polygon'?[geom.coordinates]:geom.coordinates;
+    polys.forEach(pc=>{const paths=pc.map(ring=>toPath(ring));
+      const poly=new kakao.maps.Polygon({map,path:paths,strokeWeight:1,strokeColor:color,strokeOpacity:0.9,fillColor:color,fillOpacity:0.25});
+      kakao.maps.event.addListener(poly,'click',(e)=>{showBuildingPopup(f,e.latLng);});
+      shadowBldPolygons.push(poly);
+    });
+  });
+  setStatus(`일조 분석: 건물 ${shadowBuildings.length}동 로드 완료`);
+  renderShadowsAt();
+}
+
+function showBuildingPopup(f,latLng) {
+  if(_shadowBldOverlay){_shadowBldOverlay.setMap(null);_shadowBldOverlay=null;}
+  const p=f.properties;
+  const name=p.bld_nm??p.BLD_NM??'(이름없음)';
+  const h=Number(p.bd_hght??p.BD_HGHT??0),flr=Number(p.grnd_flr??p.GRND_FLR??0);
+  const area=Number(p.totar??p.TOTAR??0),parea=Number(p.plat_area??p.PLAT_AREA??0);
+  const height=h||flr*3.2;
+  const html=`<div class="bld-info-popup"><b>${name}</b><br><span style="color:var(--text3)">높이</span> ${h?h+'m':'—'} &nbsp;<span style="color:var(--text3)">지상층</span> ${flr?flr+'층':'—'}<br><span style="color:var(--text3)">연면적</span> ${area?Math.round(area).toLocaleString()+'㎡':'—'}<br><span style="color:var(--yellow);font-weight:700;">추정 높이 ${Math.round(height)}m</span></div>`;
+  _shadowBldOverlay=new kakao.maps.CustomOverlay({map,position:latLng,content:html,yAnchor:1.1,zIndex:9000});
+  kakao.maps.event.addListenerOnce(map,'click',()=>{if(_shadowBldOverlay){_shadowBldOverlay.setMap(null);_shadowBldOverlay=null;}});
+}
+
+function onShadowSlider(el) {
+  const v=parseFloat(el.value),h=Math.floor(v),m=Math.round((v%1)*60);
+  document.getElementById('shadowTimeLabel').textContent=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  renderShadowsAt();
+}
+
+function renderShadowsAt() {
+  if(!_shadowLat||!window.SunCalc||shadowBuildings.length===0)return;
+  shadowCastPolygons.forEach(p=>p.setMap(null));shadowCastPolygons=[];
+  const dateStr=document.getElementById('shadowDateHidden').value;
+  const hourVal=parseFloat(document.getElementById('shadowSlider').value);
+  const h=Math.floor(hourVal),m=Math.round((hourVal%1)*60);
+  const date=new Date(`${dateStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`);
+  const pos=SunCalc.getPosition(date,_shadowLat,_shadowLng);
+  if(pos.altitude<=0.017){
+    document.getElementById('sunInfoBar').textContent='🌙 태양이 지평선 아래 (그림자 없음)';
+    document.getElementById('shadowCoverageBox').innerHTML='<div class="coverage-box no-parcel">☀️ 이 시간대는 태양이 지평선 아래입니다</div>';
+    return;
+  }
+  const sunBearing=(pos.azimuth+Math.PI+2*Math.PI)%(2*Math.PI);
+  const shadowBearing=(sunBearing+Math.PI)%(2*Math.PI);
+  const shadowLenPerM=1/Math.tan(pos.altitude);
+  const cosLat=Math.cos(_shadowLat*Math.PI/180);
+  const altDeg=Math.round(pos.altitude*180/Math.PI);
+  const azDeg=Math.round(sunBearing*180/Math.PI);
+  const dirs=['N','NE','E','SE','S','SW','W','NW'];
+  const dirStr=dirs[Math.round(azDeg/45)%8];
+  document.getElementById('sunInfoBar').textContent=`☀️ 방위 ${azDeg}°(${dirStr}) | 고도 ${altDeg}° | 배율 ×${shadowLenPerM.toFixed(1)}`;
+  const turfShadows=[];
+  shadowBuildings.forEach(f=>{
+    const height=f._height; if(!height||!f.geometry)return;
+    const shadowLen=Math.min(height*shadowLenPerM,600);
+    const dx=shadowLen*Math.sin(shadowBearing),dy=shadowLen*Math.cos(shadowBearing);
+    const dlng=dx/(111320*cosLat),dlat=dy/110540;
+    const geom=f.geometry; const rings=geom.type==='Polygon'?[geom.coordinates]:geom.coordinates;
+    rings.forEach(ring=>{
+      const outer=ring[0]; if(!outer||outer.length<4)return;
+      try{
+        const allPts=outer.map(c=>[c[0],c[1]]).concat(outer.map(c=>[c[0]+dlng,c[1]+dlat]));
+        const hull=turf.convex(turf.multiPoint(allPts)); if(!hull)return;
+        turfShadows.push(hull);
+        const hCoords=hull.geometry.coordinates;
+        const hPolys=hull.geometry.type==='Polygon'?[hCoords]:hCoords;
+        hPolys.forEach(pc=>{const paths=pc.map(r=>r.map(c=>new kakao.maps.LatLng(c[1],c[0])));
+          const poly=new kakao.maps.Polygon({map,path:paths,strokeWeight:0,fillColor:'#0a0a1a',fillOpacity:0.52});
+          shadowCastPolygons.push(poly);});
+      }catch(e){}
+    });
+  });
+  updateShadowCoverage(turfShadows);
+  setStatus(`일조 분석 | ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} | 그림자 ${shadowCastPolygons.length}개`);
+}
+
+function updateShadowCoverage(turfShadows) {
+  const box=document.getElementById('shadowCoverageBox');
+  if(!_addrTurfGeom){box.innerHTML='<div class="coverage-box no-parcel">필지 정보 없어 피복률 계산 불가</div>';return;}
+  if(!turfShadows.length){box.innerHTML='<div class="coverage-box no-shadow">✅ 대상 부지에 그림자 없음</div>';return;}
+  try{
+    let shadowUnion=turfShadows[0];
+    for(let i=1;i<Math.min(turfShadows.length,80);i++){try{shadowUnion=turf.union(shadowUnion,turfShadows[i]);}catch(e){}}
+    const intersection=turf.intersect(shadowUnion,_addrTurfGeom);
+    if(!intersection){box.innerHTML='<div class="coverage-box no-shadow">✅ 대상 부지에 그림자 없음</div>';return;}
+    const pct=Math.round(turf.area(intersection)/turf.area(_addrTurfGeom)*100);
+    const pctColor=pct>60?'var(--warn)':pct>30?'var(--yellow)':'var(--green)';
+    box.innerHTML=`<div class="coverage-box has-shadow">그림자 피복률<br><span class="shadow-coverage-pct" style="color:${pctColor}">${pct}%</span><span style="color:var(--text3);font-size:11px;"> (주변 건물 합산)</span></div>`;
+  }catch(e){box.innerHTML='<div class="coverage-box no-parcel" style="font-size:11px;color:var(--text3)">피복률 계산 오류</div>';}
+}
+
+function toggleShadowAnim() {
+  const btn=document.getElementById('shadowPlayBtn');
+  if(shadowAnimRunning){clearInterval(shadowAnimTimer);shadowAnimRunning=false;btn.textContent='▶ 재생';}
+  else{
+    shadowAnimRunning=true;btn.textContent='⏹ 정지';
+    shadowAnimTimer=setInterval(()=>{
+      const sl=document.getElementById('shadowSlider');let v=parseFloat(sl.value)+0.25;
+      if(v>17)v=8; sl.value=v;onShadowSlider(sl);
+    },800);
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   EDU PROTECTION ZONES
+═══════════════════════════════════════════════════ */
+async function drawEduProtectionZones(features) {
+  eduAbsolutePolygons.forEach(p=>p.setMap(null));eduAbsolutePolygons=[];
+  eduRelativePolygons.forEach(p=>p.setMap(null));eduRelativePolygons=[];
+  const toKakaoPath=ring=>ring.map(c=>new kakao.maps.LatLng(c[1],c[0]));
+  const makeKakaoPolygons=(geom,opts)=>{
+    const rawPolys=geom.type==='Polygon'?[geom.coordinates]:geom.type==='MultiPolygon'?geom.coordinates:[];
+    return rawPolys.map(polyCoords=>{const paths=polyCoords.map(ring=>toKakaoPath(ring));return new kakao.maps.Polygon({map:null,path:paths,...opts});});
+  };
+  const schoolMap=new Map();
+  features.forEach(f=>{const key=f.title||'학교';if(!schoolMap.has(key))schoolMap.set(key,[]);schoolMap.get(key).push(f);});
+  for(const[name,feats]of schoolMap){
+    let schoolUnion=null;
+    for(const f of feats){try{const tg=f.geometry.type==='Polygon'?turf.polygon(f.geometry.coordinates):turf.multiPolygon(f.geometry.coordinates);schoolUnion=schoolUnion?turf.union(schoolUnion,tg):tg;}catch(e){}}
+    if(!schoolUnion)continue;
+    try{
+      const zone50=turf.buffer(schoolUnion,50,{units:'meters'});
+      const zone200=turf.buffer(schoolUnion,200,{units:'meters'});
+      const relativeZone=turf.difference(zone200,zone50);
+      if(relativeZone?.geometry)eduRelativePolygons.push(...makeKakaoPolygons(relativeZone.geometry,{strokeWeight:1.5,strokeColor:'#ff9500',strokeOpacity:0.85,fillColor:'#ff9500',fillOpacity:0.13}));
+      if(zone50?.geometry)eduAbsolutePolygons.push(...makeKakaoPolygons(zone50.geometry,{strokeWeight:2,strokeColor:'#ff3b30',strokeOpacity:0.9,fillColor:'#ff3b30',fillOpacity:0.22}));
+    }catch(e){}
+  }
+  const showAbs=document.getElementById('toggleEduZone')?.checked??true;
+  const showRel=document.getElementById('toggleEduZone2')?.checked??true;
+  if(showRel)eduRelativePolygons.forEach(p=>p.setMap(map));
+  if(showAbs)eduAbsolutePolygons.forEach(p=>p.setMap(map));
+}
+
+function toggleEduZoneDisplay(el) {
+  const isAbsolute=el.id==='toggleEduZone';
+  const targetArr=isAbsolute?eduAbsolutePolygons:eduRelativePolygons;
+  targetArr.forEach(p=>p.setMap(el.checked?map:null));
+}
+
+/* Init sheet position */
+applySheetState();
+</script>
+</body>
+</html>
